@@ -3,19 +3,26 @@
 
 # In[1]:
 
-
 import numpy as np
 import pandas as pd
 import datetime
 import os
 import json
 import string
+import sklearn
+import re
 from sklearn.base import BaseEstimator, TransformerMixin
+import nlp
+import nltk
+from nltk.stem import WordNetLemmatizer
 from nlp import load_dataset
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-
-
+import fuzzywuzzy
+from fuzzywuzzy import fuzz
+from sklearn.metrics import classification_report,confusion_matrix
+from sklearn.metrics import roc_curve
+from sklearn.metrics import RocCurveDisplay
 # In[2]:
 
 
@@ -101,12 +108,12 @@ class RemovePunctuationXFormer(BaseEstimator, TransformerMixin):
             if len(self.text_cols)==1:
                 if self.verbose:
                     print('Columns: ', self.text_cols[0])
-                X[self.text_cols[0]] = ["".join([i if (i not in self.punc_list or i in self.ignore_list) else self.replace_string for i in x]) for x in X[self.text_cols[0]]]  
+                X[self.text_cols[0]] = [str("".join([i if (i not in self.punc_list or i in self.ignore_list) else self.replace_string for i in str(x)])) for x in X[self.text_cols[0]]]
             else:
                 for col_name in self.text_cols:
                     if self.verbose:
                         print('Columns: ', col_name)
-                    X[col_name] = ["".join([i if (i not in self.punc_list or i in self.ignore_list) else self.replace_string for i in x]) for x in X[col_name]]   
+                    X[col_name] = [str("".join([i if (i not in self.punc_list or i in self.ignore_list) else self.replace_string for i in str(x)])) for x in X[col_name]]
         except Exception as err:
             if self.verbose:
                 print('Error: ', err)
@@ -135,12 +142,13 @@ class LowerTextXFormer(BaseEstimator, TransformerMixin):
             if len(self.text_cols)==1:
                 if self.verbose:
                     print('Columns: ', self.text_cols[0])
-                X[self.text_cols[0]] = X[self.text_cols[0]].apply(lambda x: x.lower()) 
+                X[self.text_cols[0]] = X[self.text_cols[0]].apply(lambda x: str(x.lower()))
             else:
                 for col_name in self.text_cols:
                     if self.verbose:
                         print('Columns: ', col_name)
-                    X[col_name] = X[col_name].apply(lambda x: x.lower())
+                    X[col_name] = X[col_name].apply(lambda x: str(x.lower()))
+
         except Exception as err:
             if self.verbose:
                 print('Error: ', err)
@@ -150,162 +158,166 @@ class LowerTextXFormer(BaseEstimator, TransformerMixin):
             print(diff.seconds)
         return X
 
+class TokenizeTextXFormer(BaseEstimator, TransformerMixin):
+
+    def __init__(self, verbose = True):
+        self.verbose = verbose
+
+    def fit(self, X, y=None):
+        return self
+
+    def fit_transform(self, X, y=None):
+        return self.transform(X)
+
+    def transform(self, X, y=None):
+        process = True
+        start = datetime.datetime.now()
+        self.text_cols = X.columns
+        try:
+            if len(self.text_cols)==1:
+                if self.verbose:
+                    print('Columns: ', self.text_cols[0])
+                X[self.text_cols[0]] = X[self.text_cols[0]].apply(lambda x: re.split('w+',x))
+            else:
+                for col_name in self.text_cols:
+                    if self.verbose:
+                        print('Columns: ', col_name)
+                    X[col_name] = X[col_name].apply(lambda x: re.split('w+',x))
+        except Exception as err:
+            if self.verbose:
+                print('Error: ', err)
+        end = datetime.datetime.now()
+        diff = end-start
+        if self.verbose:
+            print(diff.seconds)
+        return X
+
+class StopwordsRemoveXFormer(BaseEstimator, TransformerMixin):
+
+    def __init__(self, verbose = True):
+        self.verbose = verbose
+        self.stopwords = nltk.corpus.stopwords.words('english')
+        self.wordnet_lemmatizer = WordNetLemmatizer()
+
+    def fit(self, X, y=None):
+        return self
+
+    def fit_transform(self, X, y=None):
+        return self.transform(X)
+
+    def transform(self, X, y=None):
+        process = True
+        start = datetime.datetime.now()
+        self.text_cols = X.columns
+        try:
+            if len(self.text_cols)==1:
+                if self.verbose:
+                    print('Columns: ', self.text_cols[0])
+                X[self.text_cols[0]] = X[self.text_cols[0]].apply(lambda x: [self.wordnet_lemmatizer.lemmatize(i) for i in x if i not in self.stopwords])
+            else:
+                for col_name in self.text_cols:
+                    if self.verbose:
+                        print('Columns: ', col_name)
+                    X[col_name] = X[col_name].apply(lambda x: [self.wordnet_lemmatizer.lemmatize(i) for i in x if i not in self.stopwords])
+        except Exception as err:
+            if self.verbose:
+                print('Error: ', err)
+        end = datetime.datetime.now()
+        diff = end-start
+        if self.verbose:
+            print(diff.seconds)
+        return X
 
 # In[9]:
+class TwoColumnSimilarityMatch:
 
+    def __init__(self):
+        dataset = load_dataset('glue', 'mrpc', split='train')
+        self.eg_dataset_df = pd.DataFrame([dataset['sentence1'],dataset['sentence2'],dataset['label']]).T
+        self.eg_dataset_df.columns = ['sentence1','sentence2','label']
+        nltk.download('stopwords')
 
-def test_case():
-    dataset = load_dataset('glue', 'mrpc', split='train')
-    eg_dataset_df = pd.DataFrame([dataset['sentence1'],dataset['sentence2'],dataset['label']]).T
-    eg_dataset_df.columns = ['sentence1','sentence2','label']
-    print(eg_dataset_df.head(1).values)
-    #the numeric attributes transformation pipeline
-    punc_list = []
-    for character in string.punctuation:
-        punc_list.append(str(character))
-    text_pipeline = Pipeline([
-        ('text_decode', TextDecodeXFormer(text_cols = ['sentence1','sentence2'],
-                                              encoding_utf8 = True, 
-                                              encoding_replace = False)),
-        ('remove_punctuation',RemovePunctuationXFormer(punc_list = punc_list,
-                                                        ignore_list = [',','?','.'],
-                                                        replace_string='*')),
-        ('lower_text',LowerTextXFormer())
-    ])
-    #perform the fit transform
-    eg_dataset_df_clean = text_pipeline.fit_transform(eg_dataset_df)
-    print(eg_dataset_df_clean.head(1).values)
+    def test_transforms(self):
+        process = True
+        start = datetime.datetime.now()
+        try:
+            punc_list = []
+            for character in string.punctuation:
+                punc_list.append(str(character))
+            text_pipeline = Pipeline([
+                ('text_decode', TextDecodeXFormer(text_cols = ['sentence1','sentence2'],
+                                                      encoding_utf8 = True,
+                                                      encoding_replace = False)),
+                ('remove_punctuation',RemovePunctuationXFormer(punc_list = punc_list,
+                                                                ignore_list = [',','?','.'],
+                                                                replace_string='*')),
+                ('lower_text', LowerTextXFormer()),
+                ('text_tokenize', TokenizeTextXFormer()),
+                ('stopwords_remove', StopwordsRemoveXFormer())
+            ])
+            self.eg_dataset_transform = text_pipeline.fit_transform(self.eg_dataset_df)
+        except Exception as err:
+                print('Error: ', err)
+                process = False
+        end = datetime.datetime.now()
+        diff = end-start
+        print(diff.seconds)
+        return self.eg_dataset_transform, process
 
+    def matcher_score(self):
+        similarity_score_lst = [fuzz.ratio(row['sentence1'],row['sentence2']) for index,row in self.eg_dataset_transform.iterrows()]
+        self.eg_dataset_transform['similar_op_flag'] = [1 if x>50 else 0 for x in similarity_score_lst]
+        self.eg_dataset_transform['similar_prob'] = [float(x)/100 for x in similarity_score_lst]
+        cutoff = [0,10,20,30,40,50,60,70,80,90]
+        y_val = [int(x[0]) for x in self.eg_dataset_transform['label'].values]
+        for value in cutoff:
+            print("Cutoff: ", value)
+            self.eg_dataset_transform['similar_pred_flag'] = [1 if x>=value else 0 for x in similarity_score_lst]
+            prediction_flags = self.eg_dataset_transform['similar_pred_flag'].values.tolist()
+            print(confusion_matrix(y_val,prediction_flags))
+        self.eg_dataset_transform['similar_pred_flag'] = [1 if x>70 else 0 for x in similarity_score_lst]
+        prediction_flags = self.eg_dataset_transform['similar_pred_flag'].values.tolist()
+        print(classification_report(y_val, prediction_flags , labels=[0,1], target_names = ['Value_0 (Non-Similar)','Value_1 (Similar)']))
+        fpr, tpr, _ = roc_curve(y_val, self.eg_dataset_transform['similar_prob'].values.tolist(), pos_label=1)
+        roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot()
 
-# In[10]:
+    def matcher_score_token(self):
+        similarity_score_lst = [fuzz.token_sort_ratio(row['sentence1'],row['sentence2']) for index,row in self.eg_dataset_transform.iterrows()]
+        self.eg_dataset_transform['similar_op_flag'] = [1 if x>50 else 0 for x in similarity_score_lst]
+        self.eg_dataset_transform['similar_prob'] = [float(x)/100 for x in similarity_score_lst]
+        cutoff = [0,10,20,30,40,50,60,70,80,90]
+        y_val = [int(x[0]) for x in self.eg_dataset_transform['label'].values]
+        for value in cutoff:
+            print("Cutoff: ", value)
+            self.eg_dataset_transform['similar_pred_flag'] = [1 if x>=value else 0 for x in similarity_score_lst]
+            prediction_flags = self.eg_dataset_transform['similar_pred_flag'].values.tolist()
+            print(confusion_matrix(y_val,prediction_flags))
+        self.eg_dataset_transform['similar_pred_flag'] = [1 if x>70 else 0 for x in similarity_score_lst]
+        prediction_flags = self.eg_dataset_transform['similar_pred_flag'].values.tolist()
+        print(classification_report(y_val, prediction_flags , labels=[0,1], target_names = ['Value_0 (Non-Similar)','Value_1 (Similar)']))
+        fpr, tpr, _ = roc_curve(y_val, self.eg_dataset_transform['similar_prob'].values.tolist(), pos_label=1)
+        roc_display = RocCurveDisplay(fpr=fpr, tpr=tpr).plot()
 
+import matplotlib.pyplot as plt
+matcher = TwoColumnSimilarityMatch()
+matcher.test_transforms()
+matcher.matcher_score()
+matcher.matcher_score_token()
+plt.show()
 
-test_case()
-
-
+#URL removal, HTML tags removal, Rare words removal, Frequent words removal, Spelling checking
 # In[ ]:
 
 
 #Test functions separately to get the right outputs
 
-string_data = 'Amrozi accused his brother , whom he called " the witness " , of deliberately distorting his evidence .'
-punc_list = []
-for character in string.punctuation:
-    punc_list.append(str(character))
-print(punc_list)
-ignore_list = [',','?','.']
-replace_string = '*'
-string_clean= ["".join([i if (i not in punc_list or i in ignore_list) else replace_string for i in string_data])]
-print(string_data)
-print(string_clean)
-
-
-# In[ ]:
-
-
-from sklearn.neighbors import KNeighborsTransformer
-from sklearn.manifold import TSNE
-from scipy.sparse import csr_matrix
-
-class NMSlibTransformer(TransformerMixin, BaseEstimator):
-    """Wrapper for using nmslib as sklearn's KNeighborsTransformer"""
-
-    def __init__(self, n_neighbors=5, metric="euclidean", method="sw-graph", n_jobs=1):
-        self.n_neighbors = n_neighbors
-        self.method = method
-        self.metric = metric
-        self.n_jobs = n_jobs
-
-    def fit(self, X):
-        self.n_samples_fit_ = X.shape[0]
-
-        # see more metric in the manual
-        # https://github.com/nmslib/nmslib/tree/master/manual
-        space = {
-            "euclidean": "l2",
-            "cosine": "cosinesimil",
-            "l1": "l1",
-            "l2": "l2",
-        }[self.metric]
-
-        self.nmslib_ = nmslib.init(method=self.method, space=space)
-        self.nmslib_.addDataPointBatch(X)
-        self.nmslib_.createIndex()
-        return self
-
-    def transform(self, X):
-        n_samples_transform = X.shape[0]
-
-        # For compatibility reasons, as each sample is considered as its own
-        # neighbor, one extra neighbor will be computed.
-        n_neighbors = self.n_neighbors + 1
-
-        results = self.nmslib_.knnQueryBatch(X, k=n_neighbors, num_threads=self.n_jobs)
-        indices, distances = zip(*results)
-        indices, distances = np.vstack(indices), np.vstack(distances)
-
-        indptr = np.arange(0, n_samples_transform * n_neighbors + 1, n_neighbors)
-        kneighbors_graph = csr_matrix(
-            (distances.ravel(), indices.ravel(), indptr),
-            shape=(n_samples_transform, self.n_samples_fit_),
-        )
-
-        return kneighbors_graph
-
-#https://scikit-learn.org/stable/auto_examples/neighbors/approximate_nearest_neighbors.html#sphx-glr-auto-examples-neighbors-approximate-nearest-neighbors-py
-class AnnoyTransformer(TransformerMixin, BaseEstimator):
-    """Wrapper for using annoy.AnnoyIndex as sklearn's KNeighborsTransformer"""
-
-    def __init__(self, n_neighbors=5, metric="euclidean", n_trees=10, search_k=-1):
-        self.n_neighbors = n_neighbors
-        self.n_trees = n_trees
-        self.search_k = search_k
-        self.metric = metric
-
-    def fit(self, X):
-        self.n_samples_fit_ = X.shape[0]
-        self.annoy_ = annoy.AnnoyIndex(X.shape[1], metric=self.metric)
-        for i, x in enumerate(X):
-            self.annoy_.add_item(i, x.tolist())
-        self.annoy_.build(self.n_trees)
-        return self
-
-    def transform(self, X):
-        return self._transform(X)
-
-    def fit_transform(self, X, y=None):
-        return self.fit(X)._transform(X=None)
-
-    def _transform(self, X):
-        """As `transform`, but handles X is None for faster `fit_transform`."""
-
-        n_samples_transform = self.n_samples_fit_ if X is None else X.shape[0]
-
-        # For compatibility reasons, as each sample is considered as its own
-        # neighbor, one extra neighbor will be computed.
-        n_neighbors = self.n_neighbors + 1
-
-        indices = np.empty((n_samples_transform, n_neighbors), dtype=int)
-        distances = np.empty((n_samples_transform, n_neighbors))
-
-        if X is None:
-            for i in range(self.annoy_.get_n_items()):
-                ind, dist = self.annoy_.get_nns_by_item(
-                    i, n_neighbors, self.search_k, include_distances=True
-                )
-
-                indices[i], distances[i] = ind, dist
-        else:
-            for i, x in enumerate(X):
-                indices[i], distances[i] = self.annoy_.get_nns_by_vector(
-                    x.tolist(), n_neighbors, self.search_k, include_distances=True
-                )
-
-        indptr = np.arange(0, n_samples_transform * n_neighbors + 1, n_neighbors)
-        kneighbors_graph = csr_matrix(
-            (distances.ravel(), indices.ravel(), indptr),
-            shape=(n_samples_transform, self.n_samples_fit_),
-        )
-
-        return kneighbors_graph
-
+# string_data = 'Amrozi accused his brother , whom he called " the witness " , of deliberately distorting his evidence .'
+# punc_list = []
+# for character in string.punctuation:
+#     punc_list.append(str(character))
+# print(punc_list)
+# ignore_list = [',','?','.']
+# replace_string = '*'
+# string_clean= ["".join([i if (i not in punc_list or i in ignore_list) else replace_string for i in string_data])]
+# print(string_data)
+# print(string_clean)
