@@ -56,7 +56,7 @@ face_image = pixels_orig[y:y+height,x:x+width]
 plt.imshow(face_image)
 plt.show()
 ```
-![Original Face Detected](https://github.com/anands85/pydscodes/blob/main/face_cartoon_orig_detect.png]
+![Original Face Detected](https://github.com/anands85/pydscodes/blob/main/face_cartoon_orig_detect.png)
 
 **ksize** is the size of the mask for blur function to perform on the original image. Blurring removes the differences in pixel values in the neighbor pixels.
 
@@ -72,7 +72,7 @@ norm_image = cv2.normalize(imageAllBlurred, None, alpha=0, beta=1, norm_type=cv2
 plt.imshow(norm_image)
 plt.show()
 ```
-![Output Cartoon Face](https://github.com/anands85/pydscodes/blob/main/output.png]
+![Output Cartoon Face](https://github.com/anands85/pydscodes/blob/main/output.png)
 
 ```
 # load the catoon photograph
@@ -84,7 +84,7 @@ face_image = toonpixels[y:y+height,x:x+width]
 plt.imshow(face_image)
 plt.show()
 ```
-![Original Images](https://github.com/anands85/pydscodes/blob/main/face_cartoon.png]
+![Original Images](https://github.com/anands85/pydscodes/blob/main/face_cartoon.png)
 
 ## License
 Feel free to modify, change, extend, include the codes as a comercial or free product.
